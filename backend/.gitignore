@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.py.class
+
+# Django migrations
+migrations/
+
+# SQLite database
+db.sqlite3
+
+# Environment
+.env
+venv/
+ENV/
+*.env
+
+# IDE and editor files
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+teebal-c1c73-firebase-adminsdk-fbsvc-21a0c5992d.json

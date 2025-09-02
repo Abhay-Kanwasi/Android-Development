@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "996281530998",
+    "project_id": "teebal-c1c73",
+    "storage_bucket": "teebal-c1c73.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:996281530998:android:4819bb65097bf522dcfd57",
+        "android_client_info": {
+          "package_name": "com.example.frontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBV60rCW7A1DGpv_ILBontRMXEvLt3YAfs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
