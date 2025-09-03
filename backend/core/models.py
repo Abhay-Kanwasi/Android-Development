@@ -1,8 +1,8 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.contrib.auth.models import User
 
-User = settings.AUTH_USER_MODEL
 
 class VideoTask(models.Model):
     title = models.CharField(max_length=255)

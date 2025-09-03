@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -15,34 +16,102 @@ import YouTubeVideoPlayer from './YouTubePlayer';
 import VideoQuiz from './VideoQuiz';
 import { VideoTask, VideoWatchSession, UserResponse, QuizResult } from '../types/video';
 import { apiCall } from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// --- AdMob Imports ---
+import { RewardedAd, RewardedAdEventType, TestIds, AdEventType } from 'react-native-google-mobile-ads';
+
+// --- AdMob: Use the test ID for rewarded ads ---
+const rewardedAdUnitId = Platform.select({
+  ios: TestIds.REWARDED,
+  android: TestIds.REWARDED,
+}) as string;
 
 // Navigation types
 type RootStackParamList = {
   Home: undefined;
   VideoTask: { taskId: number };
 };
-
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>;
+
+// --- AdMob: Create the ad instance outside the component ---
+const rewardedAd = RewardedAd.createForAdRequest(rewardedAdUnitId, {
+  requestNonPersonalizedAdsOnly: true,
+});
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   
-  // State for available tasks
+  // --- Your Existing State ---
   const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  
-  // State for current active task
   const [currentTask, setCurrentTask] = useState<VideoTask | null>(null);
   const [session, setSession] = useState<VideoWatchSession | null>(null);
   const [videoCompleted, setVideoCompleted] = useState<boolean>(false);
   const [quizSubmitted, setQuizSubmitted] = useState<boolean>(false);
   const [submittingQuiz, setSubmittingQuiz] = useState<boolean>(false);
 
+  // --- AdMob: State for the rewarded ad ---
+  const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
+
   useEffect(() => {
     fetchVideoTasks();
+
+    // --- AdMob: Setup and load the rewarded ad ---
+    const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      setRewardedAdLoaded(true);
+      console.log('Rewarded Ad is loaded and ready.');
+    });
+
+    const unsubscribeEarned = rewardedAd.addAdEventListener(
+      RewardedAdEventType.EARNED_REWARD,
+      (reward) => {
+        console.log('User earned reward:', reward);
+        awardAdPoints(reward.amount);
+      },
+    );
+
+    const unsubscribeClosed = rewardedAd.addAdEventListener(AdEventType.CLOSED, () => {
+      setRewardedAdLoaded(false);
+      rewardedAd.load();
+    });
+
+    rewardedAd.load();
+
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeEarned();
+      unsubscribeClosed();
+    };
   }, []);
 
+  // --- AdMob: New Function to award points via your backend API ---
+  const awardAdPoints = async (amount: number) => {
+    console.log(`Attempting to award ${amount} points...`);
+    Alert.alert('Reward Earned!', `You've earned ${amount} points.`);
+    try {
+      // This now matches your Django endpoint
+      const response = await apiCall('/award-ad-points/', { 
+        method: 'POST', 
+        data: { points: amount } 
+      });
+      console.log('Backend response:', response.data);
+      // You could even show the new total points from the response
+      // Alert.alert('Success', `Points saved! New total: ${response.data.new_total_points}`);
+    } catch (error) {
+      console.error('Failed to award points via API:', error);
+    }
+  };
+
+  // --- AdMob: New Function to show the ad ---
+  const showRewardedAd = () => {
+    if (rewardedAdLoaded) {
+      rewardedAd.show();
+    } else {
+      Alert.alert('Ad Not Ready', 'The ad is still loading. Please try again in a moment.');
+    }
+  };
+
+  // --- Your Existing Functions ---
   const fetchVideoTasks = async (): Promise<void> => {
     try {
       const response = await apiCall<VideoTask[]>('/video-tasks/');
@@ -53,21 +122,15 @@ const HomeScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-    const token = await AsyncStorage.getItem('accessToken');
-    console.log('Access token before API call:', token);
-
   };
 
   const startVideoTask = async (task: VideoTask): Promise<void> => {
     try {
-      // Start video session
       const response = await apiCall<VideoWatchSession>('/start-video-session/', {
         method: 'POST',
         data: { task_id: task.id },
       });
-      
       setSession(response.data);
-      console.log("data", response.data)
       setCurrentTask(task);
       setVideoCompleted(false);
       setQuizSubmitted(false);
@@ -85,9 +148,7 @@ const HomeScreen: React.FC = () => {
   const handleVideoEnd = async (): Promise<void> => {
     if (!videoCompleted && session) {
       try {
-        await apiCall(`/complete-video-session/${session.id}/`, {
-          method: 'POST'
-        });
+        await apiCall(`/complete-video-session/${session.id}/`, { method: 'POST' });
         setVideoCompleted(true);
         Alert.alert('Great!', 'Video completed! Now answer the quiz questions below.');
       } catch (error) {
@@ -101,7 +162,7 @@ const HomeScreen: React.FC = () => {
       try {
         await apiCall(`/update-watch-progress/${session.id}/`, {
           method: 'PUT',
-          data: { watch_duration: Math.floor(currentTime) }
+          data: { watch_duration: Math.floor(currentTime) },
         });
       } catch (error) {
         console.error('Failed to update progress:', error);
@@ -114,35 +175,18 @@ const HomeScreen: React.FC = () => {
       Alert.alert('Error', 'No active video session');
       return;
     }
-
     setSubmittingQuiz(true);
     try {
       const response = await apiCall<QuizResult>('/submit-quiz-responses/', {
         method: 'POST',
-        data: {
-          session_id: session.id,
-          responses: responses
-        }
+        data: { session_id: session.id, responses: responses },
       });
-
       const result = response.data;
       setQuizSubmitted(true);
-      
       Alert.alert(
-        'Task Complete! 🎉', 
+        'Task Complete! 🎉',
         `Score: ${result.quiz_score}%\nCorrect: ${result.correct_answers}/${result.total_questions}\nPoints Earned: ${result.total_points_awarded}`,
-        [
-          {
-            text: 'Continue',
-            onPress: () => {
-              // Reset to task selection
-              setCurrentTask(null);
-              setSession(null);
-              setVideoCompleted(false);
-              setQuizSubmitted(false);
-            }
-          }
-        ]
+        [{ text: 'Continue', onPress: () => goBackToTaskList() }]
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to submit quiz responses');
@@ -157,9 +201,8 @@ const HomeScreen: React.FC = () => {
     setVideoCompleted(false);
     setQuizSubmitted(false);
   };
-
-  console.log("sdfd", videoCompleted, "sdfsdf", !quizSubmitted)
-  // Loading state
+  
+  // --- Your Existing Render Logic ---
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -169,10 +212,8 @@ const HomeScreen: React.FC = () => {
     );
   }
 
-  // If a task is selected, show the video player and quiz
   if (currentTask) {
     const videoId = extractVideoId(currentTask.youtube_url);
-    
     return (
       <ScrollView style={styles.container}>
         <View style={styles.taskHeader}>
@@ -182,7 +223,6 @@ const HomeScreen: React.FC = () => {
           <Text style={styles.taskTitle}>{currentTask.title}</Text>
           <Text style={styles.taskDescription}>{currentTask.description}</Text>
         </View>
-
         {videoId && (
           <YouTubeVideoPlayer
             videoId={videoId}
@@ -191,7 +231,6 @@ const HomeScreen: React.FC = () => {
             height={250}
           />
         )}
-
         {videoCompleted && !quizSubmitted && (
           <VideoQuiz
             questions={currentTask.questions}
@@ -199,7 +238,6 @@ const HomeScreen: React.FC = () => {
             loading={submittingQuiz}
           />
         )}
-
         {quizSubmitted && (
           <View style={styles.completedContainer}>
             <Text style={styles.completedText}>Task Completed! 🎉</Text>
@@ -212,12 +250,24 @@ const HomeScreen: React.FC = () => {
     );
   }
 
-  // Default view - show list of available tasks
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>Video Tasks</Text>
         <Text style={styles.subtitle}>Choose a video task to complete and earn points!</Text>
+        
+        {/* --- AdMob: New Card for Showing the Rewarded Ad --- */}
+        <TouchableOpacity 
+          style={[styles.taskCard, !rewardedAdLoaded && styles.disabledCard]}
+          onPress={showRewardedAd}
+          disabled={!rewardedAdLoaded}
+        >
+          <Text style={styles.taskCardTitle}>💎 Watch a Quick Ad</Text>
+          <Text style={styles.taskCardDescription}>Watch a short video ad to earn instant points.</Text>
+          <Text style={styles.taskCardQuestions}>
+            {rewardedAdLoaded ? 'Ready to watch!' : 'Loading ad...'}
+          </Text>
+        </TouchableOpacity>
         
         {videoTasks.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -290,10 +340,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     elevation: 3,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     borderWidth: 1,
@@ -342,7 +389,6 @@ const styles = StyleSheet.create({
     color: '#34495e',
     lineHeight: 20,
   },
-  // Task view styles
   taskHeader: {
     padding: 16,
     backgroundColor: '#fff',
@@ -392,6 +438,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  // --- AdMob: New Style ---
+  disabledCard: {
+    backgroundColor: '#f0f0f0',
+    opacity: 0.7,
   },
 });
 

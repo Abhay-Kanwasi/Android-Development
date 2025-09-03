@@ -137,3 +137,35 @@ def submit_quiz_responses(request):
     }
     serializer_out = QuizResultSerializer(result)
     return Response(serializer_out.data)
+
+
+# Google Ad mob
+@api_view(['POST'])
+def award_ad_points_view(request):
+    try:
+        """
+        Creates a Reward entry for the authenticated user for watching a rewarded ad.
+        Expects {'points': <amount>} in the request body.
+        """
+        points_to_add = request.data.get('points')
+        print(f'points to add {points_to_add}')
+
+        if not isinstance(points_to_add, int) or points_to_add <= 0:
+            return Response(
+                {'error': 'A positive integer for "points" must be provided.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create a new Reward object instead of updating the user directly
+        Reward.objects.create(
+            user=user,
+            points=points_to_add,
+            session=None  # This reward is not tied to a video session
+        )
+
+        return Response(
+            {'message': f'{points_to_add} points awarded successfully.'},
+            status=status.HTTP_200_OK
+        )
+    except Exception as error:
+        print(f'Error {error}')
