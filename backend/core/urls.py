@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.routers import DefaultRouter
 from .views import (
-    VideoTaskViewSet, start_video_session, update_watch_progress,
+    VideoTaskViewSet, award_ad_points_view, start_video_session, update_watch_progress,
     complete_video_session, submit_quiz_responses
 )
 
@@ -17,4 +17,5 @@ urlpatterns = [
     path('api/update-watch-progress/<int:session_id>/', update_watch_progress, name='update-watch-progress'),
     path('api/complete-video-session/<int:session_id>/', complete_video_session, name='complete-video-session'),
     path('api/submit-quiz-responses/', submit_quiz_responses, name='submit-quiz-responses'),
+    path('api/award-ad-points/', award_ad_points_view, name='award-ad-points'),
 ]
