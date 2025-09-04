@@ -8,10 +8,10 @@ from django.utils import timezone
 
 from core.videos.permissions import IsAdminOrReadOnly
 
-from .models import VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward
+from .models import AdPlacement,  VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward
 from .serializers import (
-    VideoTaskSerializer, VideoCreateSerializer,
-    VideoWatchSessionSerializer, QuizResponseInputSerializer, QuizResultSerializer
+    AdPlacementSerializer, VideoTaskSerializer, VideoCreateSerializer,
+    VideoWatchSessionSerializer, QuizResponseInputSerializer, QuizResultSerializer, 
 )
 
 from django.contrib.auth.models import User
@@ -169,3 +169,16 @@ def award_ad_points_view(request):
         )
     except Exception as error:
         print(f'Error {error}')
+
+@api_view(['GET'])
+def get_placements_view(request):
+    """
+    Returns a dictionary of all enabled ad placements, keyed by their placement_key.
+    """
+    placements = AdPlacement.objects.filter(is_enabled=True)
+    data = {
+        p.placement_key: AdPlacementSerializer(p).data 
+        for p in placements
+    }
+    print("google ad data", data)
+    return Response(data)
