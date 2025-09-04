@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   Alert,
-  Platform,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import YouTubeVideoPlayer from './YouTubePlayer';
 import VideoQuiz from './VideoQuiz';
+import TaskCard from './TaskCard';
+import TaskHeader from './TaskHeader';
+import LoadingScreen from './LoadingScreen';
+import CompletedTaskView from './CompletedTaskView';
+import InfoSection from './InfoSection';
+import EmptyState from './EmptyState';
 import { VideoTask, VideoWatchSession, UserResponse, QuizResult } from '../types/video';
 import { apiCall } from '../services/api';
-import { RewardedAd, RewardedAdEventType, AdEventType } from 'react-native-google-mobile-ads';
+import { RewardedAd, InterstitialAd, RewardedAdEventType, AdEventType } from 'react-native-google-mobile-ads';
 
 // --- Type Definitions ---
 interface AdPlacement {
@@ -43,9 +45,11 @@ const HomeScreen: React.FC = () => {
   const [submittingQuiz, setSubmittingQuiz] = useState<boolean>(false);
   
   // --- State for Dynamic Ad System ---
-  const [adPlacement, setAdPlacement] = useState<AdPlacement | null>(null);
+  const [adPlacements, setAdPlacements] = useState<AllPlacements | null>(null);
   const [rewardedAd, setRewardedAd] = useState<RewardedAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
+  const [interstitialAd, setInterstitialAd] = useState<InterstitialAd | null>(null);
+  const [interstitialAdLoaded, setInterstitialAdLoaded] = useState(false);
   const [settingsError, setSettingsError] = useState(false);
 
   useEffect(() => {
@@ -54,56 +58,36 @@ const HomeScreen: React.FC = () => {
   }, []);
   
   useEffect(() => {
-    if (adPlacement?.is_enabled && adPlacement.ad_unit_id) {
-      console.log(`[Ad System] Creating ad request for Unit ID: ${adPlacement.ad_unit_id}`);
-      const ad = RewardedAd.createForAdRequest(adPlacement.ad_unit_id);
+    if (!adPlacements) return;
 
-      const unsubscribeLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-        console.log('[Ad System] Rewarded Ad loaded successfully.');
-        setAdLoaded(true);
-      });
-
-      const unsubscribeEarned = ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-        console.log('[Ad System] User earned reward.');
-        awardAdPoints();
-      });
-
-      const unsubscribeClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
-        setAdLoaded(false);
-        ad.load();
-      });
-      
-      const unsubscribeError = ad.addAdEventListener(AdEventType.ERROR, (error) => {
-        console.error('[Ad System] Ad failed to load with error:', error);
-        Alert.alert('Ad Error', `An error occurred while loading the ad: ${error.message}`);
-      });
-
+    // --- Load Rewarded Ad ---
+    const rewardedPlacement = adPlacements['home_screen_rewarded'];
+    if (rewardedPlacement?.is_enabled && rewardedPlacement.ad_unit_id) {
+      const ad = RewardedAd.createForAdRequest(rewardedPlacement.ad_unit_id);
+      const unsubscribeLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => setAdLoaded(true));
+      const unsubscribeEarned = ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => awardAdPoints());
+      const unsubscribeClosed = ad.addAdEventListener(AdEventType.CLOSED, () => { setAdLoaded(false); ad.load(); });
+      const unsubscribeError = ad.addAdEventListener(AdEventType.ERROR, (error) => console.error('[Ad System] Rewarded Ad failed:', error));
       ad.load();
       setRewardedAd(ad);
-
-      return () => {
-        unsubscribeLoaded();
-        unsubscribeEarned();
-        unsubscribeClosed();
-        unsubscribeError();
-      };
     }
-  }, [adPlacement]);
+
+    // --- Load Interstitial Ad ---
+    const interstitialPlacement = adPlacements['start_video_interstitial'];
+    if (interstitialPlacement?.is_enabled && interstitialPlacement.ad_unit_id) {
+      const ad = InterstitialAd.createForAdRequest(interstitialPlacement.ad_unit_id);
+      const unsubscribeLoaded = ad.addAdEventListener(AdEventType.LOADED, () => setInterstitialAdLoaded(true));
+      const unsubscribeError = ad.addAdEventListener(AdEventType.ERROR, (error) => console.error('[Ad System] Interstitial Ad failed:', error));
+      ad.load();
+      setInterstitialAd(ad);
+    }
+  }, [adPlacements]);
 
   const fetchAdPlacements = async () => {
     try {
       setSettingsError(false);
-      // --- CORRECTED DATA ACCESS ---
       const response = await apiCall<{ data: AllPlacements }>('/api/ad-placements/');
-      const allPlacements = response.data; // Access the inner data object
-
-      const homeScreenPlacement = allPlacements['home_screen_rewarded'];
-      if (homeScreenPlacement) {
-        setAdPlacement(homeScreenPlacement);
-      } else {
-        console.error("Placement key 'home_screen_rewarded' not found in backend settings.");
-        setSettingsError(true);
-      }
+      setAdPlacements(response.data);
     } catch (error) {
       console.error('Failed to fetch ad placements:', error);
       setSettingsError(true);
@@ -111,33 +95,39 @@ const HomeScreen: React.FC = () => {
   };
 
   const awardAdPoints = async () => {
-    if (!adPlacement) return;
-    const pointsToAward = adPlacement.points_reward;
+    const pointsToAward = adPlacements?.['home_screen_rewarded']?.points_reward;
+    if (!pointsToAward) return;
+    
     Alert.alert('Reward Earned!', `You've earned ${pointsToAward} points.`);
     try {
-      await apiCall('/api/award-ad-points/', {
-        method: 'POST',
-        data: { points: pointsToAward },
-      });
+      await apiCall('/api/award-ad-points/', { method: 'POST', data: { points: pointsToAward } });
     } catch (error) {
       Alert.alert('Sync Error', 'Could not save your points.');
     }
   };
   
   const showRewardedAd = () => {
-    if (rewardedAd && adLoaded) {
-      rewardedAd.show();
+    if (rewardedAd && adLoaded) rewardedAd.show();
+  };
+
+  const showInterstitialAndStartTask = (task: VideoTask) => {
+    if (interstitialAd && interstitialAdLoaded) {
+      const unsubscribeClosed = interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
+        unsubscribeClosed();
+        startVideoTask(task);
+        interstitialAd.load(); // Pre-load the next one
+      });
+      interstitialAd.show();
     } else {
-      Alert.alert('Ad Not Ready', 'The ad is still loading. Please try again.');
+      // If ad isn't ready, go straight to the task
+      startVideoTask(task);
     }
   };
 
   const fetchVideoTasks = async (): Promise<void> => {
     try {
-      // --- CORRECTED DATA ACCESS ---
       const response = await apiCall<{ data: VideoTask[] }>('/api/video-tasks/');
-      const tasks = response.data; // Access the inner data array
-      setVideoTasks(tasks || []);
+      setVideoTasks(response.data || []);
     } catch (error) {
       console.error('Failed to fetch video tasks:', error);
       setVideoTasks([]);
@@ -151,7 +141,8 @@ const HomeScreen: React.FC = () => {
       const response = await apiCall<VideoWatchSession>('/api/start-video-session/', {
         method: 'POST', data: { task_id: task.id },
       });
-      setSession(response);
+      console.log("session : ", response)
+      setSession(response.data);
       setCurrentTask(task);
       setVideoCompleted(false);
       setQuizSubmitted(false);
@@ -200,9 +191,10 @@ const HomeScreen: React.FC = () => {
         data: { session_id: session.id, responses: responses },
       });
       setQuizSubmitted(true);
+      console.log("quiz submit", result)
       Alert.alert(
         'Task Complete! 🎉',
-        `Score: ${result.quiz_score}%\nCorrect: ${result.correct_answers}/${result.total_questions}\nPoints Earned: ${result.total_points_awarded}`,
+        `Score: ${result.data.quiz_score}%\nCorrect: ${result.data.correct_answers}/${result.data.total_questions}\nPoints Earned: ${result.data.total_points_awarded}`,
         [{ text: 'Continue', onPress: () => goBackToTaskList() }]
       );
     } catch (error) {
@@ -220,25 +212,18 @@ const HomeScreen: React.FC = () => {
   };
   
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3498db" />
-        <Text style={styles.loadingText}>Loading tasks...</Text>
-      </View>
-    );
+    return <LoadingScreen message="Loading tasks..." />;
   }
 
   if (currentTask) {
     const videoId = extractVideoId(currentTask.youtube_url);
     return (
       <ScrollView style={styles.container}>
-        <View style={styles.taskHeader}>
-          <TouchableOpacity style={styles.backButton} onPress={goBackToTaskList}>
-            <Text style={styles.backButtonText}>← Back to Tasks</Text>
-          </TouchableOpacity>
-          <Text style={styles.taskTitle}>{currentTask.title}</Text>
-          <Text style={styles.taskDescription}>{currentTask.description}</Text>
-        </View>
+        <TaskHeader 
+          title={currentTask.title}
+          description={currentTask.description}
+          onBackPress={goBackToTaskList}
+        />
         {videoId && (
           <YouTubeVideoPlayer
             videoId={videoId}
@@ -255,16 +240,13 @@ const HomeScreen: React.FC = () => {
           />
         )}
         {quizSubmitted && (
-          <View style={styles.completedContainer}>
-            <Text style={styles.completedText}>Task Complete! 🎉</Text>
-            <TouchableOpacity style={styles.continueButton} onPress={goBackToTaskList}>
-              <Text style={styles.continueButtonText}>Choose Another Task</Text>
-            </TouchableOpacity>
-          </View>
+          <CompletedTaskView onContinue={goBackToTaskList} />
         )}
       </ScrollView>
     );
   }
+
+  const rewardedPlacement = adPlacements?.['home_screen_rewarded'];
 
   return (
     <ScrollView style={styles.container}>
@@ -273,53 +255,47 @@ const HomeScreen: React.FC = () => {
         <Text style={styles.subtitle}>Choose a task to complete and earn points!</Text>
         
         {settingsError ? (
-          <View style={[styles.taskCard, styles.errorCard]}>
-            <Text style={styles.taskCardTitle}>⚠️ Ad Not Available</Text>
-            <Text style={styles.taskCardDescription}>Could not load ad settings. Please try again later.</Text>
-          </View>
-        ) : adPlacement?.is_enabled && (
-          <TouchableOpacity 
-            style={[styles.taskCard, !adLoaded && styles.disabledCard]}
+          <TaskCard
+            title="⚠️ Ads Not Available"
+            description="Could not load ad settings. Please try again later."
+            footerText=""
+            onPress={() => {}}
+            variant="error"
+          />
+        ) : rewardedPlacement?.is_enabled && (
+          <TaskCard
+            title="💎 Watch a Quick Ad"
+            description={`Watch a short video ad to earn ${rewardedPlacement.points_reward} points.`}
+            footerText={adLoaded ? 'Ready to watch!' : 'Loading ad...'}
             onPress={showRewardedAd}
             disabled={!adLoaded}
-          >
-            <Text style={styles.taskCardTitle}>💎 Watch a Quick Ad</Text>
-            <Text style={styles.taskCardDescription}>
-              Watch a short video ad to earn {adPlacement.points_reward} points.
-            </Text>
-            <Text style={styles.taskCardQuestions}>
-              {adLoaded ? 'Ready to watch!' : 'Loading ad...'}
-            </Text>
-          </TouchableOpacity>
+            variant="ad"
+          />
         )}
         
         {videoTasks.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No video tasks available</Text>
-          </View>
+          <EmptyState message="No video tasks available" />
         ) : (
           videoTasks.map((task) => (
-            <TouchableOpacity 
+            <TaskCard
               key={task.id}
-              style={styles.taskCard}
-              onPress={() => startVideoTask(task)}
-            >
-              <Text style={styles.taskCardTitle}>📹 {task.title}</Text>
-              <Text style={styles.taskCardDescription}>{task.description}</Text>
-              <Text style={styles.taskCardQuestions}>
-                {task.questions.length} quiz questions
-              </Text>
-            </TouchableOpacity>
+              title={`📹 ${task.title}`}
+              description={task.description}
+              footerText={`${task.questions.length} quiz questions`}
+              onPress={() => showInterstitialAndStartTask(task)}
+            />
           ))
         )}
         
-         <View style={styles.infoContainer}>
-          <Text style={styles.infoTitle}>How it works:</Text>
-          <Text style={styles.infoText}>• Select a video task from the list</Text>
-          <Text style={styles.infoText}>• Watch the YouTube video completely</Text>
-          <Text style={styles.infoText}>• Answer quiz questions after watching</Text>
-          <Text style={styles.infoText}>• Earn points for completion + bonus for correct answers</Text>
-        </View>
+        <InfoSection 
+          title="How it works:"
+          items={[
+            'Select a video task from the list',
+            'Watch the YouTube video completely',
+            'Answer quiz questions after watching',
+            'Earn points for completion + bonus for correct answers'
+          ]}
+        />
       </View>
     </ScrollView>
   );
@@ -347,131 +323,6 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     lineHeight: 22,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#7f8c8d',
-  },
-  taskCard: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 15,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    borderWidth: 1,
-    borderColor: '#e1e8ed',
-  },
-  taskCardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 8,
-  },
-  taskCardDescription: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
-  taskCardQuestions: {
-    fontSize: 12,
-    color: '#3498db',
-    fontWeight: '500',
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#7f8c8d',
-  },
-  infoContainer: {
-    backgroundColor: '#ecf0f1',
-    padding: 20,
-    borderRadius: 12,
-    marginTop: 20,
-  },
-  infoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#2c3e50',
-  },
-  infoText: {
-    fontSize: 14,
-    marginBottom: 5,
-    color: '#34495e',
-    lineHeight: 20,
-  },
-  taskHeader: {
-    padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e1e8ed',
-  },
-  backButton: {
-    marginBottom: 10,
-  },
-  backButtonText: {
-    color: '#3498db',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  taskTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 8,
-  },
-  taskDescription: {
-    fontSize: 16,
-    color: '#7f8c8d',
-    lineHeight: 22,
-  },
-  completedContainer: {
-    padding: 32,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    margin: 16,
-    borderRadius: 12,
-  },
-  completedText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#27ae60',
-    marginBottom: 16,
-  },
-  continueButton: {
-    backgroundColor: '#3498db',
-    padding: 12,
-    borderRadius: 8,
-    minWidth: 150,
-  },
-  continueButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  disabledCard: {
-    backgroundColor: '#f0f0f0',
-    opacity: 0.7,
-  },
-  errorCard: {
-    backgroundColor: '#fff0f0',
-    borderColor: '#d9534f',
-  },
 });
 
 export default HomeScreen;
-
