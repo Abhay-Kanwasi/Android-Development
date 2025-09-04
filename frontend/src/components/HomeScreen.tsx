@@ -1,4 +1,3 @@
-// src/components/HomeScreen.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,32 +15,25 @@ import YouTubeVideoPlayer from './YouTubePlayer';
 import VideoQuiz from './VideoQuiz';
 import { VideoTask, VideoWatchSession, UserResponse, QuizResult } from '../types/video';
 import { apiCall } from '../services/api';
+import { RewardedAd, RewardedAdEventType, AdEventType } from 'react-native-google-mobile-ads';
 
-// --- AdMob Imports ---
-import { RewardedAd, RewardedAdEventType, TestIds, AdEventType } from 'react-native-google-mobile-ads';
-
-// --- AdMob: Use the test ID for rewarded ads ---
-const rewardedAdUnitId = Platform.select({
-  ios: TestIds.REWARDED,
-  android: TestIds.REWARDED,
-}) as string;
-
-// Navigation types
+// --- Type Definitions ---
+interface AdPlacement {
+  is_enabled: boolean;
+  points_reward: number;
+  ad_unit_id: string;
+}
+interface AllPlacements {
+  [key: string]: AdPlacement;
+}
 type RootStackParamList = {
   Home: undefined;
   VideoTask: { taskId: number };
 };
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
-// --- AdMob: Create the ad instance outside the component ---
-const rewardedAd = RewardedAd.createForAdRequest(rewardedAdUnitId, {
-  requestNonPersonalizedAdsOnly: true,
-});
-
 const HomeScreen: React.FC = () => {
-  const navigation = useNavigation<HomeScreenNavigationProp>();
-  
-  // --- Your Existing State ---
+  // --- State for Video Tasks ---
   const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [currentTask, setCurrentTask] = useState<VideoTask | null>(null);
@@ -49,76 +41,106 @@ const HomeScreen: React.FC = () => {
   const [videoCompleted, setVideoCompleted] = useState<boolean>(false);
   const [quizSubmitted, setQuizSubmitted] = useState<boolean>(false);
   const [submittingQuiz, setSubmittingQuiz] = useState<boolean>(false);
-
-  // --- AdMob: State for the rewarded ad ---
-  const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
+  
+  // --- State for Dynamic Ad System ---
+  const [adPlacement, setAdPlacement] = useState<AdPlacement | null>(null);
+  const [rewardedAd, setRewardedAd] = useState<RewardedAd | null>(null);
+  const [adLoaded, setAdLoaded] = useState(false);
+  const [settingsError, setSettingsError] = useState(false);
 
   useEffect(() => {
     fetchVideoTasks();
-
-    // --- AdMob: Setup and load the rewarded ad ---
-    const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
-      setRewardedAdLoaded(true);
-      console.log('Rewarded Ad is loaded and ready.');
-    });
-
-    const unsubscribeEarned = rewardedAd.addAdEventListener(
-      RewardedAdEventType.EARNED_REWARD,
-      (reward) => {
-        console.log('User earned reward:', reward);
-        awardAdPoints(reward.amount);
-      },
-    );
-
-    const unsubscribeClosed = rewardedAd.addAdEventListener(AdEventType.CLOSED, () => {
-      setRewardedAdLoaded(false);
-      rewardedAd.load();
-    });
-
-    rewardedAd.load();
-
-    return () => {
-      unsubscribeLoaded();
-      unsubscribeEarned();
-      unsubscribeClosed();
-    };
+    fetchAdPlacements();
   }, []);
+  
+  useEffect(() => {
+    if (adPlacement?.is_enabled && adPlacement.ad_unit_id) {
+      console.log(`[Ad System] Creating ad request for Unit ID: ${adPlacement.ad_unit_id}`);
+      const ad = RewardedAd.createForAdRequest(adPlacement.ad_unit_id);
 
-  // --- AdMob: New Function to award points via your backend API ---
-  const awardAdPoints = async (amount: number) => {
-    console.log(`Attempting to award ${amount} points...`);
-    Alert.alert('Reward Earned!', `You've earned ${amount} points.`);
-    try {
-      // This now matches your Django endpoint
-      const response = await apiCall('/award-ad-points/', { 
-        method: 'POST', 
-        data: { points: amount } 
+      const unsubscribeLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
+        console.log('[Ad System] Rewarded Ad loaded successfully.');
+        setAdLoaded(true);
       });
-      console.log('Backend response:', response.data);
-      // You could even show the new total points from the response
-      // Alert.alert('Success', `Points saved! New total: ${response.data.new_total_points}`);
+
+      const unsubscribeEarned = ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+        console.log('[Ad System] User earned reward.');
+        awardAdPoints();
+      });
+
+      const unsubscribeClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
+        setAdLoaded(false);
+        ad.load();
+      });
+      
+      const unsubscribeError = ad.addAdEventListener(AdEventType.ERROR, (error) => {
+        console.error('[Ad System] Ad failed to load with error:', error);
+        Alert.alert('Ad Error', `An error occurred while loading the ad: ${error.message}`);
+      });
+
+      ad.load();
+      setRewardedAd(ad);
+
+      return () => {
+        unsubscribeLoaded();
+        unsubscribeEarned();
+        unsubscribeClosed();
+        unsubscribeError();
+      };
+    }
+  }, [adPlacement]);
+
+  const fetchAdPlacements = async () => {
+    try {
+      setSettingsError(false);
+      // --- CORRECTED DATA ACCESS ---
+      const response = await apiCall<{ data: AllPlacements }>('/api/ad-placements/');
+      const allPlacements = response.data; // Access the inner data object
+
+      const homeScreenPlacement = allPlacements['home_screen_rewarded'];
+      if (homeScreenPlacement) {
+        setAdPlacement(homeScreenPlacement);
+      } else {
+        console.error("Placement key 'home_screen_rewarded' not found in backend settings.");
+        setSettingsError(true);
+      }
     } catch (error) {
-      console.error('Failed to award points via API:', error);
+      console.error('Failed to fetch ad placements:', error);
+      setSettingsError(true);
     }
   };
 
-  // --- AdMob: New Function to show the ad ---
+  const awardAdPoints = async () => {
+    if (!adPlacement) return;
+    const pointsToAward = adPlacement.points_reward;
+    Alert.alert('Reward Earned!', `You've earned ${pointsToAward} points.`);
+    try {
+      await apiCall('/api/award-ad-points/', {
+        method: 'POST',
+        data: { points: pointsToAward },
+      });
+    } catch (error) {
+      Alert.alert('Sync Error', 'Could not save your points.');
+    }
+  };
+  
   const showRewardedAd = () => {
-    if (rewardedAdLoaded) {
+    if (rewardedAd && adLoaded) {
       rewardedAd.show();
     } else {
-      Alert.alert('Ad Not Ready', 'The ad is still loading. Please try again in a moment.');
+      Alert.alert('Ad Not Ready', 'The ad is still loading. Please try again.');
     }
   };
 
-  // --- Your Existing Functions ---
   const fetchVideoTasks = async (): Promise<void> => {
     try {
-      const response = await apiCall<VideoTask[]>('/video-tasks/');
-      setVideoTasks(response.data);
+      // --- CORRECTED DATA ACCESS ---
+      const response = await apiCall<{ data: VideoTask[] }>('/api/video-tasks/');
+      const tasks = response.data; // Access the inner data array
+      setVideoTasks(tasks || []);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load video tasks');
       console.error('Failed to fetch video tasks:', error);
+      setVideoTasks([]);
     } finally {
       setLoading(false);
     }
@@ -126,11 +148,10 @@ const HomeScreen: React.FC = () => {
 
   const startVideoTask = async (task: VideoTask): Promise<void> => {
     try {
-      const response = await apiCall<VideoWatchSession>('/start-video-session/', {
-        method: 'POST',
-        data: { task_id: task.id },
+      const response = await apiCall<VideoWatchSession>('/api/start-video-session/', {
+        method: 'POST', data: { task_id: task.id },
       });
-      setSession(response.data);
+      setSession(response);
       setCurrentTask(task);
       setVideoCompleted(false);
       setQuizSubmitted(false);
@@ -138,7 +159,7 @@ const HomeScreen: React.FC = () => {
       Alert.alert('Error', 'Failed to start video task');
     }
   };
-
+  
   const extractVideoId = (url: string): string | null => {
     const regex = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/;
     const match = url.match(regex);
@@ -148,7 +169,7 @@ const HomeScreen: React.FC = () => {
   const handleVideoEnd = async (): Promise<void> => {
     if (!videoCompleted && session) {
       try {
-        await apiCall(`/complete-video-session/${session.id}/`, { method: 'POST' });
+        await apiCall(`/api/complete-video-session/${session.id}/`, { method: 'POST' });
         setVideoCompleted(true);
         Alert.alert('Great!', 'Video completed! Now answer the quiz questions below.');
       } catch (error) {
@@ -160,7 +181,7 @@ const HomeScreen: React.FC = () => {
   const handleProgressUpdate = async (currentTime: number): Promise<void> => {
     if (session && currentTime > 0) {
       try {
-        await apiCall(`/update-watch-progress/${session.id}/`, {
+        await apiCall(`/api/update-watch-progress/${session.id}/`, {
           method: 'PUT',
           data: { watch_duration: Math.floor(currentTime) },
         });
@@ -171,17 +192,13 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleQuizSubmit = async (responses: UserResponse[]): Promise<void> => {
-    if (!session) {
-      Alert.alert('Error', 'No active video session');
-      return;
-    }
+    if (!session) return;
     setSubmittingQuiz(true);
     try {
-      const response = await apiCall<QuizResult>('/submit-quiz-responses/', {
+      const result = await apiCall<QuizResult>('/api/submit-quiz-responses/', {
         method: 'POST',
         data: { session_id: session.id, responses: responses },
       });
-      const result = response.data;
       setQuizSubmitted(true);
       Alert.alert(
         'Task Complete! 🎉',
@@ -202,12 +219,11 @@ const HomeScreen: React.FC = () => {
     setQuizSubmitted(false);
   };
   
-  // --- Your Existing Render Logic ---
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3498db" />
-        <Text style={styles.loadingText}>Loading video tasks...</Text>
+        <Text style={styles.loadingText}>Loading tasks...</Text>
       </View>
     );
   }
@@ -240,7 +256,7 @@ const HomeScreen: React.FC = () => {
         )}
         {quizSubmitted && (
           <View style={styles.completedContainer}>
-            <Text style={styles.completedText}>Task Completed! 🎉</Text>
+            <Text style={styles.completedText}>Task Complete! 🎉</Text>
             <TouchableOpacity style={styles.continueButton} onPress={goBackToTaskList}>
               <Text style={styles.continueButtonText}>Choose Another Task</Text>
             </TouchableOpacity>
@@ -253,21 +269,29 @@ const HomeScreen: React.FC = () => {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Video Tasks</Text>
-        <Text style={styles.subtitle}>Choose a video task to complete and earn points!</Text>
+        <Text style={styles.title}>Available Tasks</Text>
+        <Text style={styles.subtitle}>Choose a task to complete and earn points!</Text>
         
-        {/* --- AdMob: New Card for Showing the Rewarded Ad --- */}
-        <TouchableOpacity 
-          style={[styles.taskCard, !rewardedAdLoaded && styles.disabledCard]}
-          onPress={showRewardedAd}
-          disabled={!rewardedAdLoaded}
-        >
-          <Text style={styles.taskCardTitle}>💎 Watch a Quick Ad</Text>
-          <Text style={styles.taskCardDescription}>Watch a short video ad to earn instant points.</Text>
-          <Text style={styles.taskCardQuestions}>
-            {rewardedAdLoaded ? 'Ready to watch!' : 'Loading ad...'}
-          </Text>
-        </TouchableOpacity>
+        {settingsError ? (
+          <View style={[styles.taskCard, styles.errorCard]}>
+            <Text style={styles.taskCardTitle}>⚠️ Ad Not Available</Text>
+            <Text style={styles.taskCardDescription}>Could not load ad settings. Please try again later.</Text>
+          </View>
+        ) : adPlacement?.is_enabled && (
+          <TouchableOpacity 
+            style={[styles.taskCard, !adLoaded && styles.disabledCard]}
+            onPress={showRewardedAd}
+            disabled={!adLoaded}
+          >
+            <Text style={styles.taskCardTitle}>💎 Watch a Quick Ad</Text>
+            <Text style={styles.taskCardDescription}>
+              Watch a short video ad to earn {adPlacement.points_reward} points.
+            </Text>
+            <Text style={styles.taskCardQuestions}>
+              {adLoaded ? 'Ready to watch!' : 'Loading ad...'}
+            </Text>
+          </TouchableOpacity>
+        )}
         
         {videoTasks.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -288,8 +312,8 @@ const HomeScreen: React.FC = () => {
             </TouchableOpacity>
           ))
         )}
-
-        <View style={styles.infoContainer}>
+        
+         <View style={styles.infoContainer}>
           <Text style={styles.infoTitle}>How it works:</Text>
           <Text style={styles.infoText}>• Select a video task from the list</Text>
           <Text style={styles.infoText}>• Watch the YouTube video completely</Text>
@@ -439,11 +463,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  // --- AdMob: New Style ---
   disabledCard: {
     backgroundColor: '#f0f0f0',
     opacity: 0.7,
   },
+  errorCard: {
+    backgroundColor: '#fff0f0',
+    borderColor: '#d9534f',
+  },
 });
 
 export default HomeScreen;
+

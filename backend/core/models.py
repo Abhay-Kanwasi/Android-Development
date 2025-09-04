@@ -54,3 +54,26 @@ class Reward(models.Model):
     points = models.IntegerField()
     created_at = models.DateTimeField(default=timezone.now)
     paid_out = models.BooleanField(default=False)
+
+class AdPlacement(models.Model):
+    AD_FORMAT_CHOICES = [
+        ('REWARDED', 'Rewarded'),
+        ('BANNER', 'Banner'),
+        ('INTERSTITIAL', 'Interstitial'),
+    ]
+
+    placement_key = models.CharField(
+        max_length=50, 
+        unique=True, 
+        help_text="A unique key for the app to fetch, e.g., 'home_screen_rewarded'"
+    )
+    ad_format = models.CharField(max_length=20, choices=AD_FORMAT_CHOICES)
+    is_enabled = models.BooleanField(default=True)
+    points_reward = models.PositiveIntegerField(
+        default=0, 
+        help_text="Points awarded (only for 'Rewarded' format)"
+    )
+    ad_unit_id = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.placement_key

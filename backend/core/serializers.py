@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward
+from .models import  AdPlacement, VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward
 
 class QuizQuestionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -55,3 +55,8 @@ class QuizResultSerializer(serializers.Serializer):
     correct_answers = serializers.IntegerField()
     total_questions = serializers.IntegerField()
     total_points_awarded = serializers.IntegerField()
+
+class AdPlacementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdPlacement
+        fields = ('ad_format', 'is_enabled', 'points_reward', 'ad_unit_id')
