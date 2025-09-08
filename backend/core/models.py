@@ -77,3 +77,57 @@ class AdPlacement(models.Model):
 
     def __str__(self):
         return self.placement_key
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bitlabs_user_id = models.CharField(max_length=100, unique=True)
+    total_earnings = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    available_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.bitlabs_user_id}"
+
+class SurveyCompletion(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('rejected', 'Rejected'),
+        ('quota_full', 'Quota Full'),
+    ]
+    
+    user_profile = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
+    survey_id = models.CharField(max_length=100)
+    click_id = models.CharField(max_length=200, unique=True)
+    reward_amount = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ['user_profile', 'survey_id']
+    
+    def __str__(self):
+        return f"{self.user_profile.user.username} - Survey {self.survey_id}"
+
+class SurveyTransaction(models.Model):
+    TRANSACTION_TYPES = [
+        ('survey_reward', 'Survey Reward'),
+        ('withdrawal', 'Withdrawal'),
+        ('bonus', 'Bonus'),
+    ]
+    
+    user_profile = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    description = models.TextField()
+    survey_completion = models.ForeignKey(
+        SurveyCompletion, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.user_profile.user.username} - {self.transaction_type}: ${self.amount}"
