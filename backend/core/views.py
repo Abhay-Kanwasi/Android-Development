@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import JsonResponse
 from django.views import View
+
 import json
 import uuid
 import logging
@@ -112,7 +113,7 @@ def submit_quiz_responses(request):
     correct_answers = 0
     total_points_awarded = 0
 
-    with SurveyTransaction.atomic():
+    with transaction.atomic():
         for r in responses_data:
             q_id = r['question']
             user_answer = r['user_answer'].strip()

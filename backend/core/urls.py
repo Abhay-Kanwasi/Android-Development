@@ -13,22 +13,19 @@ urlpatterns = [
     path('', include(router.urls)),
     # path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     # path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # Youtube Video Integration
     path('api/start-video-session/', start_video_session, name='start-video-session'),
     path('api/update-watch-progress/<int:session_id>/', update_watch_progress, name='update-watch-progress'),
     path('api/complete-video-session/<int:session_id>/', complete_video_session, name='complete-video-session'),
     path('api/submit-quiz-responses/', submit_quiz_responses, name='submit-quiz-responses'),
+
+    # AdMob Integration
     path('api/award-ad-points/', award_ad_points_view, name='award-ad-points'),
     path('api/ad-placements/', get_placements_view, name='ad-placements'),
     # BitLabs Survey Integration
     path('api/surveys/', get_surveys, name='get_surveys'),
-    # path('api/surveys/debug/', debug_bitlabs_api, name='debug_bitlabs_api'),
     path('api/surveys/start/', start_survey, name='start_survey'),
     path('api/dashboard/', user_dashboard, name='user_dashboard'),
     path('api/bitlabs/callback/', BitLabsCallbackView.as_view(), name='bitlabs_callback'),
-    
-    # # Debug endpoints
-    # path('api/test/public/', test_endpoint_public, name='test_public'),
-    # path('api/test/private/', test_endpoint_private, name='test_private'),
-    # path('api/test/create-user/', create_test_user, name='create_test_user'),
-    # path('api/test/surveys-no-auth/', debug_surveys_no_auth, name='debug_surveys_no_auth'),
 ]
