@@ -5,10 +5,21 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.http import JsonResponse
+from django.views import View
+import json
+import uuid
+import logging
 
 from core.videos.permissions import IsAdminOrReadOnly
+from core.services.bitlabs_service import BitLabsService
 
-from .models import AdPlacement,  VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward
+from .models import (
+    AdPlacement, VideoTask, QuizQuestion, VideoWatchSession, QuizResponse, Reward,
+    UserProfile, SurveyCompletion, SurveyTransaction
+)
 from .serializers import (
     AdPlacementSerializer, VideoTaskSerializer, VideoCreateSerializer,
     VideoWatchSessionSerializer, QuizResponseInputSerializer, QuizResultSerializer, 
@@ -18,6 +29,8 @@ from django.contrib.auth.models import User
 
 user = User.objects.get(username="abhay")
 print(user)
+
+logger = logging.getLogger(__name__)
 
 # Video tasks viewset
 class VideoTaskViewSet(viewsets.ModelViewSet):
@@ -99,7 +112,7 @@ def submit_quiz_responses(request):
     correct_answers = 0
     total_points_awarded = 0
 
-    with transaction.atomic():
+    with SurveyTransaction.atomic():
         for r in responses_data:
             q_id = r['question']
             user_answer = r['user_answer'].strip()
@@ -182,3 +195,243 @@ def get_placements_view(request):
     }
     print("google ad data", data)
     return Response(data)
+
+@api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+def get_surveys(request):
+    """Fetch available surveys for authenticated user"""
+    try:
+        user_profile, created = UserProfile.objects.get_or_create(
+            user=user,
+            defaults={'bitlabs_user_id': str(uuid.uuid4())}
+        )
+        
+        bitlabs_service = BitLabsService()
+        surveys_data = bitlabs_service.get_surveys(user_profile.bitlabs_user_id)
+        # print(f'surveys data {surveys_data}')
+        if surveys_data is None:
+            return Response(
+                {'error': 'Failed to fetch surveys'}, 
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
+        # Filter and format surveys for mobile
+        surveys = surveys_data['data'].get('surveys', [])
+        formatted_surveys = []
+        # print(f'surveys {surveys}')
+        for survey in surveys:
+            formatted_surveys.append({
+                "id": survey.get("id"),
+                "reward": int(survey.get("value", 0)),  # BitLabs returns "value" as string → convert to int
+                "duration": survey.get("loi", 0),       # length of interview
+                "category": survey.get("category", {}).get("name", "General"),
+                "rating": survey.get("rating", 0),
+                "conversion_level": survey.get("conversion_level", "medium"),  # may not always exist
+                "click_url": survey.get("click_url"),
+                "cpi": float(survey.get("cpi", 0)),     # cost per install, convert string → float
+                "country": survey.get("country", "Unknown"),
+                "language": survey.get("language", "en"),
+            })
+        print(f'surveys {surveys}\n user balance {float(user_profile.available_balance)}\n total earning {float(user_profile.total_earnings)}')
+        return Response({
+            'surveys': formatted_surveys,
+            'user_balance': float(user_profile.available_balance),
+            'total_earnings': float(user_profile.total_earnings),
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in get_surveys: {e}")
+        return Response(
+            {'error': 'Internal server error'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+def start_survey(request):
+    """Generate survey URL for user to start survey"""
+    try:
+        survey_id = request.data.get('survey_id')
+        if not survey_id:
+            return Response({'error': 'survey_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user_profile = UserProfile.objects.get(user=user)
+        click_id = str(uuid.uuid4())
+        
+        # Create survey completion record
+        survey_completion, created = SurveyCompletion.objects.get_or_create(
+            user_profile=user_profile,
+            survey_id=survey_id,
+            defaults={'click_id': click_id}
+        )
+        
+        if not created:
+            return Response({'error': 'Survey already started'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        bitlabs_service = BitLabsService()
+        surveys = bitlabs_service.get_surveys(user_profile.bitlabs_user_id)
+        if not surveys:
+            survey_completion.delete()  # Cleanup
+            return Response({'error': 'Failed to fetch surveys'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        
+        # Find the survey with the matching survey_id
+        survey = next((s for s in surveys['data']['surveys'] if s['id'] == survey_id), None)
+        if not survey:
+            survey_completion.delete()  # Cleanup
+            return Response({'error': 'Survey not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Redirect to the survey's click_url
+        return Response({'survey_url': survey['click_url'], 'click_id': click_id})
+        
+    except UserProfile.DoesNotExist:
+        return Response({'error': 'User profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in start_survey: {e}")
+        return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+def user_dashboard(request):
+    """Get user dashboard data"""
+    try:
+        user_profile = UserProfile.objects.get(user=user)
+        
+        recent_completions = SurveyCompletion.objects.filter(
+            user_profile=user_profile
+        ).order_by('-started_at')[:10]
+        
+        recent_transactions = SurveyTransaction.objects.filter(
+            user_profile=user_profile
+        ).order_by('-created_at')[:10]
+        
+        completion_data = []
+        for completion in recent_completions:
+            completion_data.append({
+                'survey_id': completion.survey_id,
+                'status': completion.status,
+                'reward_amount': float(completion.reward_amount) if completion.reward_amount else 0,
+                'started_at': completion.started_at.isoformat(),
+                'completed_at': completion.completed_at.isoformat() if completion.completed_at else None,
+            })
+        
+        transaction_data = []
+        for transaction in recent_transactions:
+            transaction_data.append({
+                'type': transaction.transaction_type,
+                'amount': float(transaction.amount),
+                'description': transaction.description,
+                'created_at': transaction.created_at.isoformat(),
+            })
+        
+        return Response({
+            'user_profile': {
+                'username': user_profile.user.username,
+                'available_balance': float(user_profile.available_balance),
+                'total_earnings': float(user_profile.total_earnings),
+            },
+            'recent_completions': completion_data,
+            'recent_transactions': transaction_data,
+        })
+        
+    except UserProfile.DoesNotExist:
+        return Response(
+            {'error': 'User profile not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error in user_dashboard: {e}")
+        return Response(
+            {'error': 'Internal server error'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@method_decorator(csrf_exempt, name='dispatch')
+class BitLabsCallbackView(View):
+    """Handle S2S callbacks from BitLabs"""
+    
+    def post(self, request):
+        try:
+            # Get signature from header
+            signature = request.META.get('HTTP_X_BITLABS_SIGNATURE')
+            if not signature:
+                logger.warning("Missing signature in callback")
+                return JsonResponse({'error': 'Missing signature'}, status=400)
+            
+            # Get payload
+            payload = request.body.decode('utf-8')
+            
+            # Verify signature
+            bitlabs_service = BitLabsService()
+            if not bitlabs_service.verify_callback_signature(payload, signature):
+                logger.warning("Invalid signature in callback")
+                return JsonResponse({'error': 'Invalid signature'}, status=401)
+            
+            # Parse callback data
+            callback_data = json.loads(payload)
+            
+            # Process callback
+            self._process_callback(callback_data)
+            
+            return JsonResponse({'status': 'success'})
+            
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON in callback")
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            logger.error(f"Error processing callback: {e}")
+            return JsonResponse({'error': 'Internal server error'}, status=500)
+    
+    def _process_callback(self, data):
+        """Process the callback data and update user rewards"""
+        event_type = data.get('type')
+        user_id = data.get('uid')
+        survey_id = data.get('survey_id')
+        click_id = data.get('click_id')
+        reward = data.get('reward', 0)
+        
+        try:
+            user_profile = UserProfile.objects.get(bitlabs_user_id=user_id)
+            
+            if event_type == 'survey_completed':
+                # Update survey completion
+                survey_completion = SurveyCompletion.objects.get(
+                    user_profile=user_profile,
+                    click_id=click_id
+                )
+                survey_completion.status = 'completed'
+                survey_completion.reward_amount = reward
+                survey_completion.completed_at = timezone.now()
+                survey_completion.save()
+                
+                # Update user balance
+                user_profile.available_balance += reward
+                user_profile.total_earnings += reward
+                user_profile.save()
+                
+                # Create transaction record
+                SurveyTransaction.objects.create(
+                    user_profile=user_profile,
+                    transaction_type='survey_reward',
+                    amount=reward,
+                    description=f'Survey {survey_id} completion reward',
+                    survey_completion=survey_completion
+                )
+                
+                logger.info(f"Processed survey completion for user {user_id}: ${reward}")
+                
+            elif event_type == 'survey_rejected':
+                survey_completion = SurveyCompletion.objects.get(
+                    user_profile=user_profile,
+                    click_id=click_id
+                )
+                survey_completion.status = 'rejected'
+                survey_completion.save()
+                
+                logger.info(f"Survey rejected for user {user_id}")
+                
+        except UserProfile.DoesNotExist:
+            logger.error(f"User profile not found for BitLabs user ID: {user_id}")
+        except SurveyCompletion.DoesNotExist:
+            logger.error(f"Survey completion not found for click ID: {click_id}")
+        except Exception as e:
+            logger.error(f"Error processing callback for user {user_id}: {e}")

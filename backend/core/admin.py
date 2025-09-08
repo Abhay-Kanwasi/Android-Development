@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from core.models import AdPlacement, Reward, VideoTask, QuizQuestion
+from core.models import (
+    AdPlacement, Reward, VideoTask, QuizQuestion, VideoWatchSession, QuizResponse,
+    UserProfile, SurveyCompletion, SurveyTransaction
+)
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Sum
 
@@ -26,3 +29,33 @@ class RewardAdmin(admin.ModelAdmin):
 @admin.register(AdPlacement)
 class AdPlacementAdmin(admin.ModelAdmin):
     list_display = ('placement_key', 'ad_format', 'is_enabled', 'points_reward')
+
+
+# Register additional models
+admin.site.register(VideoWatchSession)
+admin.site.register(QuizResponse)
+
+
+# BitLabs Survey Integration Admin
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'bitlabs_user_id', 'available_balance', 'total_earnings', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__username', 'bitlabs_user_id']
+    readonly_fields = ['created_at']
+
+
+@admin.register(SurveyCompletion)
+class SurveyCompletionAdmin(admin.ModelAdmin):
+    list_display = ['user_profile', 'survey_id', 'status', 'reward_amount', 'started_at', 'completed_at']
+    list_filter = ['status', 'started_at', 'completed_at']
+    search_fields = ['user_profile__user__username', 'survey_id', 'click_id']
+    readonly_fields = ['started_at']
+
+
+@admin.register(SurveyTransaction)
+class SurveyTransactionAdmin(admin.ModelAdmin):
+    list_display = ['user_profile', 'transaction_type', 'amount', 'created_at']
+    list_filter = ['transaction_type', 'created_at']
+    search_fields = ['user_profile__user__username', 'description']
+    readonly_fields = ['created_at']

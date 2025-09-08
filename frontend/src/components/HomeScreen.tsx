@@ -18,6 +18,7 @@ import EmptyState from './EmptyState';
 import { VideoTask, VideoWatchSession, UserResponse, QuizResult } from '../types/video';
 import { apiCall } from '../services/api';
 import { RewardedAd, InterstitialAd, RewardedAdEventType, AdEventType } from 'react-native-google-mobile-ads';
+import SurveysScreen from './SurveysScreen';
 
 // --- Type Definitions ---
 interface AdPlacement {
@@ -87,6 +88,7 @@ const HomeScreen: React.FC = () => {
     try {
       setSettingsError(false);
       const response = await apiCall<{ data: AllPlacements }>('/api/ad-placements/');
+      console.log("response data ", response)
       setAdPlacements(response.data);
     } catch (error) {
       console.error('Failed to fetch ad placements:', error);
@@ -297,6 +299,7 @@ const HomeScreen: React.FC = () => {
           ]}
         />
       </View>
+      <SurveysScreen />
     </ScrollView>
   );
 };

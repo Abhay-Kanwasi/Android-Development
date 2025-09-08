@@ -16,11 +16,24 @@ echo Cleaning Android build...
 cd android
 gradlew clean
 
-echo Going back to project root...
+echo Removing native build cache...
+rmdir /s /q .cxx
+rmdir /s /q app\build
 cd ..
+
+echo Reinstalling node modules...
+rmdir /s /q node_modules
+del package-lock.json
+call npm install
+
+echo Removing generated bad autolinking cmake...
+del /q android\app\build\generated\autolinking\src\main\jni\Android-autolinking.cmake
 
 echo Running app on Android...
 npx react-native run-android
+
+echo Running android on AndroidStudio
+npm run android
 
 endlocal
 pause

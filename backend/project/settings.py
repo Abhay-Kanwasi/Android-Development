@@ -10,6 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+from decouple import config
 from datetime import timedelta
 from pathlib import Path
 
@@ -20,13 +22,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9d-7lp60z&!c-*_!37x%3$4!_yv^&sqjck+g#jekl12z6+qlu='
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# BitLabs Configuration
+BITLABS_CONFIG = {
+    'APP_TOKEN': config('BITLABS_APP_TOKEN'),        # For API authentication
+    'APP_SECRET': config('BITLABS_APP_SECRET'),      # App secret (backup auth)
+    'S2S_SECRET': config('BITLABS_S2S_SECRET'),      # For webhook signature verification
+    'BASE_URL': config('BITLABS_BASE_URL', default='https://api.bitlabs.ai'),
+    'USER_ID': config('USER_ID')
+}
 
 ALLOWED_HOSTS = ["*", "10.0.2.2", "localhost", "127.0.0.1"]
+
 
 
 # Application definition
@@ -127,7 +136,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = True
-
+CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://0.0.0.0:3000',
@@ -135,13 +144,23 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://10.0.2.2:8000"
 ]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # <-- make all APIs public
     ]
 }
-
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
@@ -163,4 +182,23 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
     "USER_AUTHENTICATION_RULE": "rest_framework_simplejwt.authentication.default_user_authentication_rule",
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'bitlabs_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'bitlabs_callbacks.log',
+        },
+    },
+    'loggers': {
+        'bitlabs': {
+            'handlers': ['bitlabs_file'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
 }
