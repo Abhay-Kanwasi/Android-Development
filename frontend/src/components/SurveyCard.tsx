@@ -20,7 +20,7 @@ const SurveyCard: React.FC<SurveyCardProps> = ({ survey, onStartSurvey, isLoadin
       default: return '#9E9E9E';
     }
   };
-
+  console.log("ss", survey.conversion_level)
   const formatDuration = (minutes: number): string => {
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
