@@ -17,7 +17,8 @@ class BitLabsService:
         self.app_secret = self.config['APP_SECRET'] 
         self.s2s_secret = self.config['S2S_SECRET']
         
-        logger.info(f"BitLabs Service initialized with base_url: {self.base_url}")
+        logger.info(f"BitLabs Service initialized with base_url: {self.base_url}{self.app_token}")
+        print(f"BitLabs Service initialized with base_url: {self.base_url} and api token: {self.app_token}")
     
     def _get_headers(self, user_id: str) -> Dict[str, str]:
         """Get headers for BitLabs API requests"""

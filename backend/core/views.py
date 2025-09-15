@@ -209,7 +209,7 @@ def get_surveys(request):
         
         bitlabs_service = BitLabsService()
         surveys_data = bitlabs_service.get_surveys(user_profile.bitlabs_user_id)
-        print(f'surveys data {surveys_data}')
+        print(f'surveys data {len(surveys_data)}')
         if surveys_data is None:
             return Response(
                 {'error': 'Failed to fetch surveys'}, 

@@ -11,13 +11,15 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from pathlib import Path
 from decouple import config
 from datetime import timedelta
-from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)  
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -188,17 +190,17 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {
-        'bitlabs_file': {
+        'teebal_file': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': 'bitlabs_callbacks.log',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'teebal.log'),
+            'maxBytes': 5 * 1024 * 1024,  
+            'backupCount': 5,            
+            'encoding': 'utf-8',
         },
     },
-    'loggers': {
-        'bitlabs': {
-            'handlers': ['bitlabs_file'],
-            'level': 'INFO',
-            'propagate': True,
-        },
+    'root': {
+        'handlers': ['teebal_file'],
+        'level': 'INFO',
     },
 }
