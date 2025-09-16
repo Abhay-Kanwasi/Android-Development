@@ -1,5 +1,5 @@
 package com.example.frontend
-
+import com.packet.sdk.PacketSdk
 import android.app.Application
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -33,6 +33,9 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Initialize Packet SDK
+    PacketSdk.initialize(this, "v4M52udTrqTfb0v3")
+    PacketSdk.setEnableLogging(true)
     loadReactNative(this)
   }
 }
