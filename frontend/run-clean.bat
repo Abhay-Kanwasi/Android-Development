@@ -15,6 +15,7 @@ if not exist package.json (
 echo Cleaning Android build...
 cd android
 gradlew clean
+gradlew build
 
 echo Removing native build cache...
 rmdir /s /q .cxx
