@@ -14,7 +14,8 @@ This project is built with a **Vanilla React Native frontend** and a **Django ba
 The application supports multiple ad providers for monetization:  
 - Google AdMob  
 - Bitlab  
-- YouTube  
+- YouTube
+- Packet SDK  
 
 ---
 
